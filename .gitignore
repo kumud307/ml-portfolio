@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Downloaded data and trained models (re-created automatically)
+data/
+
+# Streamlit secrets
+.streamlit/secrets.toml
