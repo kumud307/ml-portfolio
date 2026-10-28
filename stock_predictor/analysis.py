@@ -1,23 +1,24 @@
-"""Risk metrics, scoring rules, sector comparison and the personal safety check."""
+"""Risk metrics, today's scores, sector comparison and the personal safety check.
+
+Only backtested strategies decide the ranking. Company fundamentals can't be
+backtested here (we only have today's figures, not past ones), so they are
+shown as checks and warnings, never mixed into the score.
+"""
 
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
+from .backtest import strategy_scores
 from .universe import BENCHMARK
 
 FINANCIAL_SECTOR = "Financial Services"
 
-# The ML signal and the trend pick a shortlist from all stocks; company
-# fundamentals (slow to download) are then fetched only for that shortlist.
-SHORTLIST_WEIGHTS = {"ml_rank": 0.6, "trend_score": 0.4}
-FINAL_WEIGHTS = {"ml_rank": 0.45, "trend_score": 0.25, "fundamental_score": 0.30}
-
-SIGNALS = [  # (minimum score, label)
-    (0.85, "Strong candidate"),
-    (0.70, "Candidate"),
-    (0.45, "Watch"),
+SIGNALS = [  # (minimum percentile rank today, label)
+    (0.95, "Strong candidate"),
+    (0.80, "Candidate"),
+    (0.50, "Watch"),
     (0.00, "Avoid for now"),
 ]
 
@@ -56,12 +57,12 @@ def risk_metrics(close):
     return risk
 
 
-def trend_checks(latest):
+def trend_checks(table):
     return pd.DataFrame({
-        "Above 50-day average": latest.sma50_gap > 0,
-        "Above 200-day average": latest.sma200_gap > 0,
-        "Beating the market (3 months)": latest.rel_60 > 0,
-        "Not overbought or oversold (RSI 40-70)": latest.rsi_14.between(40, 70),
+        "Above 50-day average": table.sma50_gap > 0,
+        "Above 200-day average": table.sma200_gap > 0,
+        "Beating the market (3 months)": table.rel_60 > 0,
+        "Not overbought or oversold (RSI 40-70)": table.rsi_14.between(40, 70),
     })
 
 
@@ -93,38 +94,33 @@ def fundamental_checks(fundamentals, sector_of, sector_pe):
     })
 
 
-def _weighted(frame, weights):
-    """Weighted average that ignores missing components."""
-    parts = frame[list(weights)]
-    w = pd.DataFrame({k: parts[k].notna() * v for k, v in weights.items()})
-    return (parts.fillna(0) * w).sum(axis=1) / w.sum(axis=1)
-
-
-def signal_label(score):
-    return next(label for floor, label in SIGNALS if score >= floor)
-
-
-def score_stocks(latest, risk, universe):
-    """All stocks with ML probability, trend score, risk and shortlist score."""
-    table = latest.join(risk).join(universe[["name", "sector"]])
-    table["ml_rank"] = table.ml_prob.rank(pct=True)
-    table["trend_score"] = trend_checks(table).mean(axis=1)
-    table["shortlist_score"] = _weighted(table, SHORTLIST_WEIGHTS)
-    return table.sort_values("shortlist_score", ascending=False)
-
-
 def add_fundamentals(table, fundamentals, sector_pe):
-    """Final score for the rows that have fundamentals downloaded."""
     table = table.join(fundamentals, how="left")
     checks = fundamental_checks(fundamentals, table.sector, sector_pe)
     table["fundamental_score"] = checks.mean(axis=1).reindex(table.index)
-    table["score"] = _weighted(table, FINAL_WEIGHTS)
-    table["signal"] = table.score.map(signal_label)
-    return table.sort_values("score", ascending=False)
+    return table
+
+
+def signal_label(rank_pct):
+    return next(label for floor, label in SIGNALS if rank_pct >= floor)
+
+
+def score_today(latest, risk, universe, strategy):
+    """Every eligible stock today, scored by every strategy and ranked by `strategy`."""
+    scores = strategy_scores(latest)
+    table = latest.join(risk).join(universe[["name"]])
+    table["name"] = table["name"].fillna(pd.Series(table.index, index=table.index))
+    for name in scores:
+        table[f"score: {name}"] = scores[name]
+    table["rank_pct"] = scores[strategy].rank(pct=True)
+    table["signal"] = table["rank_pct"].map(signal_label)
+    table["trend_score"] = trend_checks(table).mean(axis=1)
+    return table.sort_values("rank_pct", ascending=False)
 
 
 def sector_summary(table):
-    groups = table.groupby("sector")
+    in_top_50 = table.rank_pct >= table.rank_pct.nlargest(50).min()
+    groups = table.assign(in_top_50=in_top_50).groupby("sector")
     summary = pd.DataFrame({
         "stocks": groups.size(),
         "return_1m": groups.ret_20.median(),
@@ -132,14 +128,12 @@ def sector_summary(table):
         "vs_market_3m": groups.rel_60.median(),
         "breadth": groups.sma50_gap.agg(lambda s: (s > 0).mean()),
         "volatility": groups.volatility.median(),
-        "ml_outperform_prob": groups.ml_prob.mean(),
-        "trend_score": groups.trend_score.mean(),
+        "avg_rank": groups.rank_pct.mean(),
+        "top_50": groups.in_top_50.sum(),
     })
-    summary["strength"] = _weighted(
-        summary.assign(ml_rank=summary.ml_outperform_prob.rank(pct=True),
-                       momentum_rank=summary.vs_market_3m.rank(pct=True)),
-        {"ml_rank": 0.4, "momentum_rank": 0.3, "breadth": 0.3},
-    )
+    summary["strength"] = (summary.avg_rank.rank(pct=True) * 0.4
+                           + summary.vs_market_3m.rank(pct=True) * 0.3
+                           + summary.breadth * 0.3)
     return summary.sort_values("strength", ascending=False)
 
 
@@ -150,15 +144,18 @@ class SafetyReport:
     risk_level: str
     fits_profile: bool
     max_allocation: float        # share of total portfolio
-    suggested_amount: float      # rupees, capped by budget
+    suggested_amount: float      # rupees
     bad_month_loss: float        # rupees on the amount above
     worst_year_loss: float       # rupees, if last year's worst drop repeats
     positives: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
 
 
-def safety_check(row, profile, portfolio_value, backtest, news_sentiment=None):
-    """Plain-language answer to: is this stock safe for *me* to buy right now?"""
+def safety_check(row, profile, portfolio_value, strategy, strategy_stats, news_sentiment=None):
+    """Plain-language answer to: is this stock safe for *me* to buy right now?
+
+    `strategy_stats` is the strategy's backtest summary row (hit rate, etc.).
+    """
     accepted, cap = RISK_PROFILES[profile]
     fits = row.risk_level in accepted
     max_alloc = cap * (0.5 if row.risk_level == "High" else 1.0)
@@ -177,10 +174,10 @@ def safety_check(row, profile, portfolio_value, backtest, news_sentiment=None):
         bad.append(f"Trading {-row.drawdown_252:.0%} below its 1-year high")
     if row.rsi_14 > 75:
         bad.append(f"Looks overbought (RSI {row.rsi_14:.0f}); buying after a sharp run-up is risky")
-    if row.ml_prob >= 0.55:
-        good.append(f"Model gives a {row.ml_prob:.0%} chance of beating the market next month")
-    elif row.ml_prob < 0.45:
-        bad.append(f"Model gives only a {row.ml_prob:.0%} chance of beating the market next month")
+    if row.rank_pct >= 0.80:
+        good.append(f"Ranked in the top {1 - row.rank_pct:.0%} of stocks by the {strategy} strategy")
+    elif row.rank_pct < 0.50:
+        bad.append(f"Ranked in the bottom half of stocks by the {strategy} strategy")
     if row.beta > 1.3:
         bad.append(f"Swings {row.beta:.1f}x as much as the market (beta)")
 
@@ -202,21 +199,18 @@ def safety_check(row, profile, portfolio_value, backtest, news_sentiment=None):
     elif news_sentiment is not None and news_sentiment > 0.2:
         good.append("Recent news headlines are mostly positive")
 
-    score = row.get("score")
-    if score is None or pd.isna(score):
-        score = row.shortlist_score
     if not fits:
         verdict, tone = (f"Too risky for a {profile}-risk investor. This stock is rated "
                          f"{row.risk_level} risk."), "critical"
-    elif score >= 0.70 and len(bad) <= 2:
+    elif row.rank_pct >= 0.80 and len(bad) <= 2:
         verdict, tone = ("Reasonable to consider, within the position limit below. "
                          "Consider buying in 2-3 parts rather than all at once."), "good"
-    elif score >= 0.45:
+    elif row.rank_pct >= 0.50:
         verdict, tone = "Mixed signals. Better to watch it for now than buy.", "warning"
     else:
         verdict, tone = "Avoid for now. Most signals are negative.", "critical"
-    if not backtest.has_edge:
-        bad.append("The model's past accuracy is close to a coin flip, so weight its signal lightly")
+    bad.append(f"Even the {strategy} strategy beat the market in only "
+               f"{strategy_stats['hit_rate']:.0%} of past holding periods, so any single pick can lose")
 
     return SafetyReport(
         verdict=verdict,

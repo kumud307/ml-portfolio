@@ -8,8 +8,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import yfinance as yf
 
+from .config import HISTORY_YEARS
 from .paths import CACHE_DIR
-from .universe import BENCHMARK, BENCHMARK_SYMBOL
+from .universe import BENCHMARK, BENCHMARK_SYMBOL, VIX, VIX_SYMBOL
 
 # yfinance still uses pandas' deprecated inplace= arguments; the warnings are noise.
 warnings.filterwarnings("ignore", message=".*inplace keyword.*")
@@ -36,45 +37,50 @@ def _is_fresh(path, ttl):
     return path.exists() and time.time() - path.stat().st_mtime < ttl
 
 
-def _download(yahoo_symbols, period):
+def _download(yahoo_symbols, start):
     frames = []
-    for start in range(0, len(yahoo_symbols), BATCH_SIZE):
-        batch = yahoo_symbols[start:start + BATCH_SIZE]
-        raw = yf.download(batch, period=period, auto_adjust=True, progress=False, threads=True)
+    for i in range(0, len(yahoo_symbols), BATCH_SIZE):
+        batch = yahoo_symbols[i:i + BATCH_SIZE]
+        raw = yf.download(batch, start=start, auto_adjust=True, progress=False, threads=True)
         if not raw.empty:
             frames.append(raw[["Close", "Volume"]])
     return pd.concat(frames, axis=1) if frames else pd.DataFrame()
 
 
-def load_prices(symbols, period="5y", refresh=False):
-    """Daily close and volume for each symbol plus the NIFTY 500 benchmark.
+def load_prices(symbols, years=HISTORY_YEARS, refresh=False):
+    """Daily close and volume for each symbol, plus the NIFTY 500 and India VIX.
 
-    Returns (close, volume, missing) where missing lists symbols Yahoo had no
-    usable history for (too new, suspended or renamed).
+    Returns (close, volume, vix, missing). `close` includes a NIFTY500 column;
+    `missing` lists symbols Yahoo had no usable history for (too new,
+    suspended or renamed).
     """
     CACHE_DIR.mkdir(exist_ok=True)
-    cache = CACHE_DIR / f"prices_{period}.pkl"
+    cache = CACHE_DIR / f"prices_{years}y.pkl"
     wanted = sorted(symbols)
     if not refresh and _is_fresh(cache, PRICE_TTL):
         cached = pd.read_pickle(cache)
         if cached["symbols"] == wanted:
-            return cached["close"], cached["volume"], cached["missing"]
+            return cached["close"], cached["volume"], cached["vix"], cached["missing"]
 
     yahoo = {f"{s}.NS": s for s in wanted}
     yahoo[BENCHMARK_SYMBOL] = BENCHMARK
-    raw = _download(list(yahoo), period)
+    yahoo[VIX_SYMBOL] = VIX
+    start = (pd.Timestamp.today() - pd.DateOffset(years=years)).strftime("%Y-%m-%d")
+    raw = _download(list(yahoo), start)
     if raw.empty or BENCHMARK_SYMBOL not in raw["Close"]:
         raise RuntimeError("Could not download prices from Yahoo Finance. Check your internet connection.")
 
     close = raw["Close"].rename(columns=yahoo)
     volume = raw["Volume"].rename(columns=yahoo)
     close = close[close[BENCHMARK].notna()].sort_index()
+    vix = close.pop(VIX).ffill() if VIX in close else pd.Series(index=close.index, dtype=float)
     close = close.loc[:, close.notna().sum() >= MIN_HISTORY_DAYS]
     volume = volume.reindex(index=close.index, columns=close.columns)
     missing = sorted(set(wanted) - set(close.columns))
 
-    pd.to_pickle({"symbols": wanted, "close": close, "volume": volume, "missing": missing}, cache)
-    return close, volume, missing
+    pd.to_pickle({"symbols": wanted, "close": close, "volume": volume, "vix": vix,
+                  "missing": missing}, cache)
+    return close, volume, vix, missing
 
 
 def _fetch_info(symbol):

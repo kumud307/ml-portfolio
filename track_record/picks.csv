@@ -1,0 +1,31 @@
+as_of,horizon,strategy,pick,symbol,name,sector,signal_price
+2026-10-28,15,Momentum (12-1 month),1,STLTECH,Sterlite Technologies Ltd.,Telecommunication,877.0
+2026-10-28,15,Momentum (12-1 month),2,SIGMAADV,SIGMA ADVANCED SYSTEMS LTD.,Capital Goods,904.2999877929688
+2026-10-28,15,Momentum (12-1 month),3,CUPID,Cupid Ltd.,FMCG,314.6499938964844
+2026-10-28,15,Momentum (12-1 month),4,WELCORP,Welspun Corp Ltd.,Capital Goods,2559.0
+2026-10-28,15,Momentum (12-1 month),5,SANSERA,Sansera Engineering Ltd.,Auto,4296.10009765625
+2026-10-28,15,Momentum (12-1 month),6,SHREEJISPG,Shreeji Shipping Global Ltd.,Services,836.0999755859375
+2026-10-28,15,Momentum (12-1 month),7,MTARTECH,MTAR Technologies Ltd.,Capital Goods,6978.0
+2026-10-28,15,Momentum (12-1 month),8,SHILPAMED,Shilpa Medicare Ltd.,Healthcare,927.5999755859375
+2026-10-28,15,Momentum (12-1 month),9,HFCL,HFCL Ltd.,Telecommunication,243.60000610351562
+2026-10-28,15,Momentum (12-1 month),10,RUBICON,Rubicon Research Ltd.,Healthcare,1563.9000244140625
+2026-10-28,15,ML model,1,JSLL,Jeena Sikho Lifecare Ltd.,Consumer Services,346.75
+2026-10-28,15,ML model,2,SWSOLAR,Sterling and Wilson Renewable Energy Ltd.,Construction,144.1999969482422
+2026-10-28,15,ML model,3,YESBANK,Yes Bank Ltd.,Financial Services,15.609999656677246
+2026-10-28,15,ML model,4,FIVESTAR,Five-Star Business Finance Ltd.,Financial Services,412.3500061035156
+2026-10-28,15,ML model,5,HDBFS,HDB Financial Services Ltd.,Financial Services,503.04998779296875
+2026-10-28,15,ML model,6,GREAVESCOT,Greaves Cotton Ltd.,Capital Goods,181.14999389648438
+2026-10-28,15,ML model,7,ASHAPURMIN,Ashapura Minechem Ltd.,Metals & Mining,428.20001220703125
+2026-10-28,15,ML model,8,KPIGREEN,KPI Green Energy Ltd.,Power,287.54998779296875
+2026-10-28,15,ML model,9,SHAKTIPUMP,Shakti Pumps (India) Ltd.,Capital Goods,363.75
+2026-10-28,15,ML model,10,E2E,E2E NETWORKS Ltd.,IT,536.7999877929688
+2026-10-28,5,ML model,1,SHAKTIPUMP,Shakti Pumps (India) Ltd.,Capital Goods,363.75
+2026-10-28,5,ML model,2,GRSE,Garden Reach Shipbuilders & Engineers Ltd.,Capital Goods,1900.0
+2026-10-28,5,ML model,3,M&MFIN,Mahindra & Mahindra Financial Services Ltd.,Financial Services,263.0
+2026-10-28,5,ML model,4,YESBANK,Yes Bank Ltd.,Financial Services,15.609999656677246
+2026-10-28,5,ML model,5,MAZDOCK,Mazagoan Dock Shipbuilders Ltd.,Capital Goods,1733.199951171875
+2026-10-28,5,ML model,6,CREDITACC,CreditAccess Grameen Ltd.,Financial Services,1029.0
+2026-10-28,5,ML model,7,SWIGGY,Swiggy Ltd.,Consumer Services,183.5
+2026-10-28,5,ML model,8,BAJAJCON,Bajaj Consumer Care Ltd.,FMCG,381.8500061035156
+2026-10-28,5,ML model,9,JPPOWER,Jaiprakash Power Ventures Ltd.,Power,13.0
+2026-10-28,5,ML model,10,JSLL,Jeena Sikho Lifecare Ltd.,Consumer Services,346.75
