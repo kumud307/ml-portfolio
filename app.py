@@ -88,6 +88,11 @@ def travel_many(horizon, refresh_count):
     return time_machine.run_many(market.panel, market.close, horizon)
 
 
+@st.cache_resource(ttl=6 * 3600, show_spinner=False)
+def save_lists(refresh_count):
+    pipeline.save_lists(load_market(refresh_count))
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_headlines():
     return news.fetch_headlines()
@@ -114,6 +119,8 @@ with st.spinner("Loading prices and building features (first run takes 2-3 minut
 with st.spinner(f"Testing every strategy on {HORIZON_CHOICES[horizon]} holding periods "
                 "(about a minute the first time each day)..."):
     run = load_strategy(horizon, refresh_count)
+with st.spinner("Saving today's lists for every strategy (about a minute the first time each day)..."):
+    save_lists(refresh_count)
 bt = run.backtest
 summary = bt.summary
 
@@ -164,7 +171,7 @@ with tabs[0]:
                "the new list.")
 
     st.info(
-        f"**Track record of this strategy** ({bt.start:%b %Y} to {bt.end:%b %Y}, "
+        f"**Backtest of this strategy** ({bt.start:%b %Y} to {bt.end:%b %Y}, "
         f"{len(bt.equity)} periods of {horizon} days, tested only on data the model never saw): "
         f"**{pct(stats.cagr, False)} a year** after costs ({pct(stats.cagr_after_tax, False)} after "
         f"tax) vs **{pct(summary.loc[INDEX, 'cagr'], False)}** for the NIFTY 500. It beat the "
@@ -210,9 +217,8 @@ with tabs[0]:
         st.warning(f"{weak} picks pass fewer than half of the company-quality checks. "
                    "Look them up in **Is it safe for me?** before buying.", icon="🔍")
 
-    saved = tracker.record(as_of, horizon, strategy, picks)
-    st.caption(("✅ Saved to your live track record. " if saved else "")
-               + "See how earlier lists did in the **Live track record** tab.")
+    st.caption("Every strategy's list is saved each day. See how earlier lists did in the "
+               "**Live track record** tab.")
     st.download_button("Download this list (CSV)", picks.to_csv().encode("utf-8"),
                        file_name=f"top{TOP_N}_{horizon}d_{as_of:%Y-%m-%d}.csv", mime="text/csv")
 
@@ -238,7 +244,9 @@ with tabs[1]:
             "avg_period_return": None, "volatility": None, "ic_t_stat": None,
             "cagr": st.column_config.NumberColumn("Yearly return", format="percent",
                                                   help="Compound annual growth, after costs"),
-            "cagr_after_tax": st.column_config.NumberColumn("After tax", format="percent"),
+            "cagr_after_tax": st.column_config.NumberColumn(
+                "After tax", format="percent",
+                help="Blank for the benchmarks: buy-and-hold is taxed only when finally sold."),
             "avg_excess": st.column_config.NumberColumn(
                 "Avg vs NIFTY 500 per period", format="percent"),
             "hit_rate": st.column_config.NumberColumn(
@@ -275,9 +283,15 @@ with tabs[1]:
 
     st.warning(
         "**Read these results with care.**\n"
-        "- **Survivorship bias is reduced, not removed.** Each date only uses the stocks most "
-        "traded at that time, but companies delisted since then (e.g. after a collapse) aren't in "
-        "today's NSE list. That flatters every strategy, momentum most.\n"
+        "- **Survivorship bias is large here.** Every stock tested is on today's NSE list, so "
+        "companies that collapsed, were delisted or shrank off it are missing from the past. That "
+        "flatters every strategy, momentum most. Results fall sharply on bigger, more traded "
+        "stocks (see the research notes).\n"
+        "- **The NIFTY 500 figures include an estimated 1% a year of dividends**, because the "
+        "index level leaves them out while stock prices include them.\n"
+        "- **The start day matters.** Beginning the same cycle a few days later can change a "
+        "strategy's yearly return by several points, and the ML model's by far more. Treat these "
+        "as rough figures (see the research notes).\n"
         "- **Choosing the best of 5 strategies** after seeing their results is itself a bit of "
         "luck. Expect future returns to be lower.\n"
         "- 2020-2024 was an unusually strong rally for Indian small and mid caps. Strategies "
@@ -517,20 +531,33 @@ with tabs[4]:
 
 with tabs[5]:
     st.subheader("📒 Live track record")
-    st.caption("Every top-10 list the app shows is saved with its date. Once the holding period "
-               "has passed, it's scored against the NIFTY 500. Unlike a backtest, these picks "
+    st.caption("Every strategy's top-10 list is saved with its date, for every holding period, "
+               "whichever one you look at. Once the holding period has passed, it's scored "
+               "against the NIFTY 500 (with estimated dividends). Unlike a backtest, these picks "
                "were written down before anyone knew the outcome.")
-    record = tracker.evaluate(market.close)
+    record = pipeline.track_record(market)
     if record.empty:
         st.info("No picks recorded yet. They're saved automatically each day you open the app.")
     else:
         finished = record[record.status == "Finished"]
         if len(finished):
-            f1, f2, f3 = st.columns(3)
-            f1.metric("Finished lists", len(finished))
-            f2.metric("Average vs NIFTY 500", pct(finished.vs_market.mean()))
-            f3.metric("Lists that beat NIFTY 500", pct((finished.vs_market > 0).mean(), signed=False))
+            st.dataframe(tracker.summarise(finished), hide_index=True, width="stretch",
+                         column_config={
+                             "strategy": "Strategy", "horizon": "Days", "lists": "Finished lists",
+                             "avg_vs_market": st.column_config.NumberColumn(
+                                 "Average vs NIFTY 500", format="percent"),
+                             "won": st.column_config.NumberColumn(
+                                 "Lists that beat NIFTY 500", format="percent"),
+                         })
+            st.caption("Lists are saved daily, so their holding periods overlap: 20 finished "
+                       "15-day lists are far less evidence than 20 separate periods.")
+        no_price = record[record.status == "Missing prices"]
+        if len(no_price):
+            st.warning(f"{len(no_price)} lists can't be scored: {int(no_price.unpriced.sum())} "
+                       "of their picks no longer have any price data. They are left out of the "
+                       "summary above, so check those stocks by hand.", icon="⚠️")
         st.dataframe(record, hide_index=True, width="stretch", column_config={
+            "unpriced": None,
             "as_of": st.column_config.DateColumn("Picked on"),
             "horizon": "Days", "strategy": "Strategy", "status": "Status",
             "bought": st.column_config.DateColumn("Bought"),

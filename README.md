@@ -10,18 +10,28 @@ track record scores each list once its outcome is known.
 
 📄 **[Research notes: method, every experiment, results](RESEARCH.md)**
 
+![The dashboard's Top 10 picks tab](assets/dashboard.png)
+
 ## Headline results (15-day holding, Jul 2018 to Sep 2026, after costs)
 
-| Strategy | Yearly return | Sharpe | IC |
-|---|---|---|---|
-| ML model (gradient boosting ranker) | 18.0% | 0.54 | 0.034 (t = 2.8) |
-| Momentum (12-1 month) | 39.7% | 1.02 | 0.045 |
-| Average stock (equal weight) | 21.5% | 0.68 | |
-| NIFTY 500 | 11.0% | 0.32 | |
+| Strategy | Yearly return | Range across start days | Sharpe | IC |
+|---|---|---|---|---|
+| ML model (gradient boosting ranker) | 16.8% | 11.2% to 29.0% | 0.50 | 0.034 (t = 2.8) |
+| Momentum (12-1 month) | 39.7% | 34.4% to 41.2% | 1.02 | 0.045 |
+| Average stock (equal weight) | 21.5% | 21.3% to 22.9% | 0.68 | |
+| NIFTY 500 (with estimated dividends) | 12.1% | 11.8% to 12.6% | 0.38 | |
 
-The ML signal is statistically real but doesn't beat equal-weighting after costs; momentum
-leads but is the most flattered by the remaining survivorship bias. Details and caveats are in
-[RESEARCH.md](RESEARCH.md).
+**Treat these as upper limits, not expected returns.** The range shows the same test started on
+each of the 15 possible days of the cycle.
+
+- **The ML signal is statistically real but unreliable.** Its return depends heavily on the start
+  day, and its typical result (18.5%) is below the average stock (22.0%).
+- **Momentum came first on all 15 start days, but survivorship bias inflates it.** Every stock
+  tested is on today's NSE list, so companies that collapsed or shrank off it are missing. On
+  only the 100 most-traded stocks each day, momentum falls to 21.8% and the average stock to
+  13.8%.
+
+Details and caveats are in [RESEARCH.md](RESEARCH.md).
 
 ## Features
 
@@ -32,19 +42,21 @@ leads but is the most flattered by the remaining survivorship bias. Details and 
 | ⏳ **Time machine** | Go back to any date, train only on what was known then, pick 10 stocks for 7 days / 1 month / 6 months / 1 year, and compare with what actually happened, for one date or every quarter |
 | 🏭 **Market segments** | Sector strength, breadth and momentum |
 | 🛡️ **Is it safe for me?** | Risk level, position-size limit, rupee loss in a bad month, warning signs, chart and news for any stock |
-| 📒 **Live track record** | Every list the app shows is saved and later scored vs the NIFTY 500 |
+| 📒 **Live track record** | Every strategy's list is saved daily, for every holding period, and later scored vs the NIFTY 500 |
 
 ## How it works
 
-1. **Universe:** about 755 NSE stocks; on each date only the 500 most-traded *at that time* are
-   eligible (reduces survivorship bias).
+1. **Universe:** the 755 stocks on today's NSE Total Market list, of which 714 have enough price
+   history. On each date only the 500 most-traded *at that time* are eligible. This doesn't remove
+   survivorship bias, because every candidate is a company that made it onto today's list.
 2. **Features:** 17 per-stock signals ranked within each day, plus 7 market-regime signals
    (India VIX, market trend, breadth).
 3. **Model:** a gradient-boosting regressor predicting each stock's rank for the next 15 days.
 4. **Validation:** walk-forward with a purge gap, so the model never trains on answers it
    couldn't have known. Unit tests check this.
-5. **Simulation:** buy the day after the signal, 0.4% round-trip costs, 20% STCG tax, hold
-   buffer to cut turnover.
+5. **Simulation:** signals use finished trading days only, buy the day after the signal, 0.4%
+   round-trip costs, 20% STCG tax, hold buffer to cut turnover. The NIFTY 500 gets an estimated
+   1% a year of dividends, because stock prices include them and the index level doesn't.
 
 All assumptions live in [`stock_predictor/config.py`](stock_predictor/config.py).
 
@@ -58,7 +70,7 @@ streamlit run app.py
 ```
 
 In VS Code, press **F5** → **Run dashboard (Streamlit)**. The first run downloads 10 years of
-prices for about 755 stocks and trains the models, which takes 2-3 minutes; after that,
+prices for about 755 stocks and trains the models, which takes a few minutes; after that,
 results are cached in `data/` for the day.
 
 ### Tests
@@ -69,8 +81,9 @@ pytest
 ```
 
 The tests use a synthetic market (no internet). They check that features never use future
-prices, that training never sees unknown answers, that a "perfect foresight" score wins and a
-random one doesn't, and that costs, position sizing and the track record are correct.
+prices, that walk-forward training and the time machine never see unknown answers, that a
+"perfect foresight" score wins and a random one doesn't, that unfinished trading days are left
+out, and that costs, position sizing and the track record are correct.
 
 ## Project structure
 
@@ -92,3 +105,13 @@ tests/                       pytest suite (synthetic data)
 track_record/picks.csv       saved picks (commit this to keep the live record)
 RESEARCH.md                  method, experiments, results, limitations
 ```
+
+## More projects
+
+**Hybrid RAG** (in progress, not published yet): retrieval-augmented generation that combines
+BM25 and dense search, reranks with a cross-encoder, and checks every citation against the
+source text.
+
+## License
+
+[MIT](LICENSE)

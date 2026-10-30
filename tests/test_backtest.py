@@ -43,6 +43,13 @@ def test_random_scores_have_no_skill(panel):
     assert abs(result.summary.loc[backtest.ML, "ic"]) < 0.05
 
 
+def test_only_strategies_have_an_after_tax_figure(panel):
+    noise = pd.Series(np.random.default_rng(2).random(len(panel)), index=panel.index)
+    summary = backtest.run_backtest(panel, noise, horizon=5, top_n=5).summary
+    assert summary.loc[backtest.STRATEGIES, "cagr_after_tax"].notna().all()
+    assert summary.loc[backtest.BENCHMARKS, "cagr_after_tax"].isna().all()
+
+
 def test_buffer_covering_whole_market_never_trades(panel):
     """Documents the pitfall: a buffer as big as the market freezes the portfolio."""
     cheat = panel["fwd_excess_5"]

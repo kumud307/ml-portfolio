@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import yfinance as yf
 
-from .config import HISTORY_YEARS
+from .config import HISTORY_YEARS, PRICES_FINAL_HOUR_IST
 from .paths import CACHE_DIR
 from .universe import BENCHMARK, BENCHMARK_SYMBOL, VIX, VIX_SYMBOL
 
@@ -35,6 +35,17 @@ FUNDAMENTAL_FIELDS = {
 
 def _is_fresh(path, ttl):
     return path.exists() and time.time() - path.stat().st_mtime < ttl
+
+
+def _last_complete_day(now=None):
+    """Latest date with a final closing price.
+
+    During market hours Yahoo's bar for today holds the live price, while the
+    backtest assumes every signal comes from a finished day.
+    """
+    now = pd.Timestamp.now(tz="Asia/Kolkata") if now is None else now
+    today = now.tz_localize(None).normalize()
+    return today if now.hour >= PRICES_FINAL_HOUR_IST else today - pd.Timedelta(days=1)
 
 
 def _download(yahoo_symbols, start):
@@ -72,7 +83,7 @@ def load_prices(symbols, years=HISTORY_YEARS, refresh=False):
 
     close = raw["Close"].rename(columns=yahoo)
     volume = raw["Volume"].rename(columns=yahoo)
-    close = close[close[BENCHMARK].notna()].sort_index()
+    close = close[close[BENCHMARK].notna() & (close.index <= _last_complete_day())].sort_index()
     vix = close.pop(VIX).ffill() if VIX in close else pd.Series(index=close.index, dtype=float)
     close = close.loc[:, close.notna().sum() >= MIN_HISTORY_DAYS]
     volume = volume.reindex(index=close.index, columns=close.columns)
@@ -81,6 +92,26 @@ def load_prices(symbols, years=HISTORY_YEARS, refresh=False):
     pd.to_pickle({"symbols": wanted, "close": close, "volume": volume, "vix": vix,
                   "missing": missing}, cache)
     return close, volume, vix, missing
+
+
+def load_extra_closes(symbols, start):
+    """Daily closes for stocks outside the current NSE list, from `start` onwards.
+
+    Symbols Yahoo no longer has are simply absent from the result.
+    """
+    CACHE_DIR.mkdir(exist_ok=True)
+    cache = CACHE_DIR / "extra_closes.pkl"
+    wanted = sorted(symbols)
+    if _is_fresh(cache, PRICE_TTL):
+        cached = pd.read_pickle(cache)
+        if cached["symbols"] == wanted:
+            return cached["close"]
+
+    raw = _download([f"{s}.NS" for s in wanted], f"{start:%Y-%m-%d}")
+    close = pd.DataFrame() if raw.empty else raw["Close"].dropna(axis=1, how="all")
+    close = close.rename(columns=lambda s: s.removesuffix(".NS"))
+    pd.to_pickle({"symbols": wanted, "close": close}, cache)
+    return close
 
 
 def _fetch_info(symbol):

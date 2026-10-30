@@ -8,7 +8,7 @@ targets look forward from t + EXECUTION_LAG_DAYS.
 import numpy as np
 import pandas as pd
 
-from .config import EXECUTION_LAG_DAYS
+from .config import EXECUTION_LAG_DAYS, INDEX_DIVIDEND_YIELD
 from .universe import BENCHMARK, eligible_mask
 
 # Per-stock signals. The model sees each one as a percentile rank among that
@@ -83,6 +83,11 @@ def market_signals(index, vix, sma50_gap, eligible):
     })
 
 
+def with_dividends(index_return, days):
+    """The index's return over `days` trading days, plus its estimated dividends."""
+    return (1 + index_return) * (1 + INDEX_DIVIDEND_YIELD) ** (days / 252) - 1
+
+
 def target_columns(horizon):
     """Names of the forward-looking columns for one holding period."""
     return f"fwd_return_{horizon}", f"fwd_excess_{horizon}", f"target_rank_{horizon}"
@@ -94,8 +99,8 @@ def build_panel(close, volume, vix, sector_of, horizons):
     For each holding period h in `horizons` (trading days) there are three
     target columns: the return from buying at the close EXECUTION_LAG_DAYS
     after the signal and holding h days (fwd_return_h), the same minus the
-    NIFTY 500's return (fwd_excess_h), and that excess return's percentile
-    rank among the day's stocks (target_rank_h).
+    NIFTY 500's return with estimated dividends (fwd_excess_h), and that excess
+    return's percentile rank among the day's stocks (target_rank_h).
     """
     index = close[BENCHMARK]
     prices = close.drop(columns=BENCHMARK)
@@ -109,7 +114,7 @@ def build_panel(close, volume, vix, sector_of, horizons):
     entry, index_entry = prices.shift(-lag), index.shift(-lag)
     for h in horizons:
         fwd_return = prices.shift(-(lag + h)) / entry - 1
-        index_return = index.shift(-(lag + h)) / index_entry - 1
+        index_return = with_dividends(index.shift(-(lag + h)) / index_entry - 1, h)
         return_col, excess_col, _ = target_columns(h)
         signals[return_col] = fwd_return
         signals[excess_col] = fwd_return.sub(index_return, axis=0)

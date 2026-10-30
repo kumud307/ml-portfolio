@@ -33,7 +33,7 @@ STRATEGY_NOTES = {
     MOMENTUM_3M: "Best performers vs the market over the last 3 months",
     REVERSAL: "Biggest losers of the last week (bet on a bounce)",
     AVERAGE: "Equal amount in every eligible stock",
-    INDEX: "Simply holding the NIFTY 500 index",
+    INDEX: "Simply holding the NIFTY 500 index, with estimated dividends",
 }
 
 
@@ -177,8 +177,9 @@ def run_backtest(panel, ml_score, horizon, top_n=TOP_N, buffer=HOLD_BUFFER):
             "avg_excess": group["excess"].mean(),
             "hit_rate": (group["excess"] > 0).mean(),
             "cagr": cagr,
+            # Blank for the benchmarks: buy-and-hold is taxed only when finally sold.
             "cagr_after_tax": (_after_tax_cagr(net, net.index, per_year)
-                               if name in STRATEGIES else cagr),
+                               if name in STRATEGIES else np.nan),
             "volatility": volatility,
             "sharpe": (net.mean() * per_year - RISK_FREE_RATE) / volatility,
             "max_drawdown": _max_drawdown(curve),

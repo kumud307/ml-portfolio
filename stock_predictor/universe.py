@@ -1,9 +1,10 @@
 """The stocks we analyse, and which of them were eligible on each date.
 
-Candidates come from NSE's NIFTY Total Market list (~750 stocks with sectors).
-On every date, only the UNIVERSE_SIZE most-traded stocks *as of that date*
-are eligible. Using a fixed list of today's index members for the past would
-quietly favour companies that later grew big (survivorship bias).
+Candidates come from NSE's current NIFTY Total Market list (~750 stocks with
+sectors). On every date, only the UNIVERSE_SIZE most-traded stocks *as of that
+date* are eligible. This can't remove survivorship bias: every candidate is a
+company that made it onto today's list, and before about 2020 so few of them
+have price data that nearly all pass the filter anyway.
 """
 
 import io

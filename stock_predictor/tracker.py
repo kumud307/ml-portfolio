@@ -9,6 +9,7 @@ is the most convincing evidence a strategy works.
 import pandas as pd
 
 from .config import EXECUTION_LAG_DAYS
+from .features import with_dividends
 from .paths import ROOT
 from .universe import BENCHMARK
 
@@ -50,6 +51,10 @@ def evaluate(close, path=TRACK_FILE):
     Like the backtest, each batch is bought at the close EXECUTION_LAG_DAYS
     after the signal and held `horizon` trading days. Batches still inside
     their holding period show the return so far.
+
+    A pick that stops trading stays in at its last price. If a pick has no price
+    at all, its batch is marked "Missing prices" rather than scored without it:
+    leaving out a stock that collapsed would flatter the record.
     """
     picks = load_picks(path)
     if picks.empty:
@@ -63,9 +68,15 @@ def evaluate(close, path=TRACK_FILE):
                          "status": "Waiting to buy", "stocks": len(batch)})
             continue
         end = min(start + horizon, len(dates) - 1)
-        held = [s for s in batch.symbol if s in close.columns]
-        stock_returns = close[held].iloc[end] / close[held].iloc[start] - 1
-        index_return = close[BENCHMARK].iloc[end] / close[BENCHMARK].iloc[start] - 1
+        prices = close.reindex(columns=batch.symbol).ffill()
+        stock_returns = prices.iloc[end] / prices.iloc[start] - 1
+        unpriced = int(stock_returns.isna().sum())
+        if unpriced:
+            rows.append({"as_of": as_of, "horizon": horizon, "strategy": strategy,
+                         "status": "Missing prices", "stocks": len(batch), "unpriced": unpriced})
+            continue
+        index_return = with_dividends(
+            close[BENCHMARK].iloc[end] / close[BENCHMARK].iloc[start] - 1, end - start)
         rows.append({
             "as_of": as_of,
             "horizon": horizon,
@@ -73,10 +84,20 @@ def evaluate(close, path=TRACK_FILE):
             "status": "Finished" if start + horizon <= len(dates) - 1 else "In progress",
             "bought": dates[start],
             "until": dates[end],
-            "stocks": len(held),
+            "stocks": len(batch),
             "portfolio_return": stock_returns.mean(),
             "nifty500_return": index_return,
             "vs_market": stock_returns.mean() - index_return,
             "beat_market": int((stock_returns > index_return).sum()),
         })
     return pd.DataFrame(rows).sort_values("as_of", ascending=False)
+
+
+def summarise(finished):
+    """Finished lists per strategy and holding period; mixing them would mean nothing."""
+    groups = finished.groupby(["strategy", "horizon"], sort=False)
+    return pd.DataFrame({
+        "lists": groups.size(),
+        "avg_vs_market": groups.vs_market.mean(),
+        "won": groups.vs_market.apply(lambda s: (s > 0).mean()),
+    }).reset_index()

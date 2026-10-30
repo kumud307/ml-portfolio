@@ -19,6 +19,7 @@ UNIVERSE_SIZE = 500        # on each date: the 500 most-traded stocks *at that t
 LIQUIDITY_LOOKBACK = 126   # "most traded" = median daily traded value over ~6 months
 HISTORY_YEARS = 10         # price history: year 1 warms up the features, the next few
                            # train the first model, so testing includes the 2020 crash
+PRICES_FINAL_HOUR_IST = 16 # NSE closes at 15:30; until 16:00 treat today's price as unfinished
 
 # --- Real-world frictions (India, delivery trades) -------------------------
 # Round trip = buy + sell: STT 0.1% each side, stamp duty, exchange/SEBI fees,
@@ -26,3 +27,6 @@ HISTORY_YEARS = 10         # price history: year 1 warms up the features, the ne
 COST_ROUND_TRIP = 0.004    # 0.4% of the amount traded
 SHORT_TERM_TAX = 0.20      # STCG tax on profits from shares held under 1 year
 RISK_FREE_RATE = 0.065     # roughly what a bank FD / T-bill pays; used in Sharpe ratio
+# Stock prices include dividends but the NIFTY 500 index level doesn't, so this
+# estimate of its dividend yield is added back whenever the two are compared.
+INDEX_DIVIDEND_YIELD = 0.01

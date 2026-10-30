@@ -4,15 +4,15 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from . import analysis, backtest, model
-from .config import ALL_HORIZONS, TOP_N
-from .data import cached_fundamentals, load_fundamentals, load_prices
+from . import analysis, backtest, model, tracker
+from .config import ALL_HORIZONS, HORIZON_CHOICES, TOP_N
+from .data import cached_fundamentals, load_extra_closes, load_fundamentals, load_prices
 from .features import build_panel
 from .paths import CACHE_DIR
 from .universe import load_universe
 
 # Bump this when features or the model change, so old saved results are ignored.
-MODEL_VERSION = 2
+MODEL_VERSION = 3
 
 
 @dataclass
@@ -76,6 +76,30 @@ def top_picks(market, table, strategy, n=TOP_N):
     picks = table.loc[symbols]
     fundamentals = load_fundamentals(symbols)
     return analysis.add_fundamentals(picks, fundamentals, _sector_pe(market))
+
+
+def save_lists(market):
+    """Save every strategy's list for every holding period.
+
+    Saving only the lists someone happened to open would let the record depend
+    on what they chose to look at.
+    """
+    for horizon in HORIZON_CHOICES:
+        run = run_strategy(market, horizon)
+        for strategy in backtest.STRATEGIES:
+            table = today_table(market, run, strategy)
+            symbols = backtest.select_top(table[f"score: {strategy}"], table["sector"], TOP_N)
+            tracker.record(market.as_of, horizon, strategy, table.loc[symbols])
+
+
+def track_record(market):
+    """Score the saved lists, including picks that have since left the stock list."""
+    picks = tracker.load_picks()
+    gone = sorted(set(picks.symbol) - set(market.close.columns))
+    close = market.close
+    if gone:
+        close = close.join(load_extra_closes(gone, picks.as_of.min()))
+    return tracker.evaluate(close)
 
 
 def stock_details(market, table, symbol, peers=8):
